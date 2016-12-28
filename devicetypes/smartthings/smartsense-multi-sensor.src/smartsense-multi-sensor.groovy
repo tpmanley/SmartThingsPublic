@@ -300,10 +300,13 @@ private Map getBatteryResult(rawValue) {
 
 		def minVolts = batteryMap.min { it.key }.key
 		def maxVolts = batteryMap.max { it.key }.key
-		if (rawValue < minVolts)
-			volts = minVolts
-		else if (volts > maxVolts)
-			volts = maxVolts
+		if (rawValue < minVolts) {
+			log.warn "Battery voltage is very low (${rawValue/10}V) and the battery should be replaced"
+			rawValue = minVolts
+		}
+		else if (volts > maxVolts) {
+			rawValue = maxVolts
+		}
 		result.value = batteryMap[rawValue]
 	}
 
