@@ -14,10 +14,10 @@
  *  under the License.
  */
 import physicalgraph.zigbee.clusters.iaszone.ZoneStatus
-
+import physicalgraph.zigbee.zcl.DataType
 
 metadata {
-	definition(name: "SmartSense Motion Sensor", namespace: "smartthings", author: "SmartThings") {
+	definition(name: "SmartSense Motion Sensor Battery Testing", namespace: "smartthings", author: "SmartThings") {
 		capability "Motion Sensor"
 		capability "Configuration"
 		capability "Battery"
@@ -28,15 +28,16 @@ metadata {
 
 		command "enrollResponse"
 
-		fingerprint inClusters: "0000,0001,0003,0402,0500,0020,0B05", outClusters: "0019", manufacturer: "CentraLite", model: "3305-S"
+		attribute "batteryVoltage", "string"
+
+		//fingerprint inClusters: "0000,0001,0003,0402,0500,0020,0B05", outClusters: "0019", manufacturer: "CentraLite", model: "3305-S"
 		fingerprint inClusters: "0000,0001,0003,0402,0500,0020,0B05", outClusters: "0019", manufacturer: "CentraLite", model: "3325-S", deviceJoinName: "Motion Sensor"
-		fingerprint inClusters: "0000,0001,0003,0402,0500,0020,0B05", outClusters: "0019", manufacturer: "CentraLite", model: "3305"
-		fingerprint inClusters: "0000,0001,0003,0402,0500,0020,0B05", outClusters: "0019", manufacturer: "CentraLite", model: "3325"
-		fingerprint inClusters: "0000,0001,0003,0402,0500,0020,0B05", outClusters: "0019", manufacturer: "CentraLite", model: "3326"
-		fingerprint inClusters: "0000,0001,0003,0402,0500,0020,0B05", outClusters: "0019", manufacturer: "CentraLite", model: "3326-L", deviceJoinName: "Iris Motion Sensor"
-		fingerprint inClusters: "0000,0001,0003,0020,0402,0500,0B05", outClusters: "0019", manufacturer: "CentraLite", model: "3328-G", deviceJoinName: "Centralite Micro Motion Sensor"
-		fingerprint inClusters: "0000,0001,0003,000F,0020,0402,0500", outClusters: "0019", manufacturer: "SmartThings", model: "motionv4", deviceJoinName: "Motion Sensor"
-		fingerprint inClusters: "0000,0001,0003,000F,0020,0402,0500", outClusters: "0019", manufacturer: "SmartThings", model: "motionv5", deviceJoinName: "Motion Sensor"
+		//fingerprint inClusters: "0000,0001,0003,0402,0500,0020,0B05", outClusters: "0019", manufacturer: "CentraLite", model: "3305"
+		//fingerprint inClusters: "0000,0001,0003,0402,0500,0020,0B05", outClusters: "0019", manufacturer: "CentraLite", model: "3325"
+		//fingerprint inClusters: "0000,0001,0003,0402,0500,0020,0B05", outClusters: "0019", manufacturer: "CentraLite", model: "3326"
+		//fingerprint inClusters: "0000,0001,0003,0402,0500,0020,0B05", outClusters: "0019", manufacturer: "CentraLite", model: "3326-L", deviceJoinName: "Iris Motion Sensor"
+		//fingerprint inClusters: "0000,0001,0003,000F,0020,0402,0500", outClusters: "0019", manufacturer: "SmartThings", model: "motionv4", deviceJoinName: "Motion Sensor"
+		//fingerprint inClusters: "0000,0001,0003,000F,0020,0402,0500", outClusters: "0019", manufacturer: "SmartThings", model: "motionv5", deviceJoinName: "Motion Sensor"
 	}
 
 	simulator {
@@ -78,15 +79,15 @@ metadata {
 					]
 			)
 		}
-		valueTile("battery", "device.battery", decoration: "flat", inactiveLabel: false, width: 2, height: 2) {
-			state "battery", label: '${currentValue}% battery', unit: ""
+		valueTile("voltage", "batteryVoltage", decoration: "flat", inactiveLabel: false, width: 2, height: 2) {
+			state "battery", label:'${currentValue} mV', unit:""
 		}
 		standardTile("refresh", "device.refresh", inactiveLabel: false, decoration: "flat", width: 2, height: 2) {
 			state "default", action: "refresh.refresh", icon: "st.secondary.refresh"
 		}
 
 		main(["motion", "temperature"])
-		details(["motion", "temperature", "battery", "refresh"])
+		details(["motion", "temperature", "voltage", "refresh"])
 	}
 }
 
@@ -98,8 +99,14 @@ def parse(String description) {
 			map = parseIasMessage(description)
 		} else {
 			Map descMap = zigbee.parseDescriptionAsMap(description)
-			if (descMap?.clusterInt == 0x0001 && descMap.commandInt != 0x07 && descMap?.value) {
-				map = getBatteryResult(Integer.parseInt(descMap.value, 16))
+			if (descMap?.clusterInt == zigbee.POWER_CONFIGURATION_CLUSTER) {
+				if ((!descMap.commandInt || descMap.commandInt in [0x01, 0x04]) && descMap?.value) {
+					if (descMap.attrInt == 0x0020) {
+						map = getBatteryEvent(Integer.parseInt(descMap.value, 16))
+					} else if (descMap.attrInt == 0xF000) {
+						map = [name:"batteryVoltage", value:"${Integer.parseInt(descMap.value, 16)}"]
+					}
+				}
 			} else if (descMap?.clusterInt == zigbee.TEMPERATURE_MEASUREMENT_CLUSTER && descMap.commandInt == 0x07) {
 				if (descMap.data[0] == "00") {
 					log.debug "TEMP REPORTING CONFIG RESPONSE: $descMap"
@@ -193,13 +200,13 @@ private Map getMotionResult(value) {
  * PING is used by Device-Watch in attempt to reach the Device
  * */
 def ping() {
-	return zigbee.readAttribute(zigbee.POWER_CONFIGURATION_CLUSTER, 0x0020) // Read the Battery Level
+	return zigbee.readAttribute(zigbee.POWER_CONFIGURATION_CLUSTER, 0xF000, [mfgCode: 0x104E]) // Read the Battery Level
 }
 
 def refresh() {
 	log.debug "refresh called"
 
-	def refreshCmds = zigbee.readAttribute(zigbee.POWER_CONFIGURATION_CLUSTER, 0x0020) +
+	def refreshCmds = zigbee.readAttribute(zigbee.POWER_CONFIGURATION_CLUSTER, 0xF000, [mfgCode: 0x104E]) +
 			zigbee.readAttribute(zigbee.TEMPERATURE_MEASUREMENT_CLUSTER, 0x0000)
 
 	return refreshCmds + zigbee.enrollResponse()
@@ -212,5 +219,7 @@ def configure() {
 
 	// temperature minReportTime 30 seconds, maxReportTime 5 min. Reporting interval if no activity
 	// battery minReport 30 seconds, maxReportTime 6 hrs by default
-	return refresh() + zigbee.batteryConfig() + zigbee.temperatureConfig(30, 300) // send refresh cmds as part of config
+	refresh() +
+	zigbee.configureReporting(zigbee.POWER_CONFIGURATION_CLUSTER, 0xF000, DataType.UINT16, 0, 30, 0x0001, [mfgCode: 0x104E]) +
+	zigbee.temperatureConfig(0, 1) // send refresh cmds as part of config
 }
