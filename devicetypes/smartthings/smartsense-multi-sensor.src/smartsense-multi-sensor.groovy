@@ -17,7 +17,7 @@ import physicalgraph.zigbee.clusters.iaszone.ZoneStatus
 import physicalgraph.zigbee.zcl.DataType
 
 metadata {
-	definition(name: "SmartSense Multi Sensor", namespace: "smartthings", author: "SmartThings", runLocally: true, minHubCoreVersion: '000.017.0012', executeCommandsLocally: false, mnmn: "SmartThings", vid: "generic-contact-2") {
+	definition(name: "SmartSense Multi Sensor as Dimmer", namespace: "smartthings", author: "SmartThings", ocfDeviceType: "oic.d.light", runLocally: false, minHubCoreVersion: '000.017.0012', executeCommandsLocally: false, mnmn: "SmartThings", vid: "generic-dimmer") {
 
 		capability "Three Axis"
 		capability "Battery"
@@ -28,15 +28,13 @@ metadata {
 		capability "Refresh"
 		capability "Temperature Measurement"
 		capability "Health Check"
+		capability "Switch"
+		capability "Switch Level"
+//		capability "Color Temperature"
 
 		command "enrollResponse"
-		fingerprint inClusters: "0000,0001,0003,0402,0500,0020,0B05,FC02", outClusters: "0019", manufacturer: "CentraLite", model: "3320"
-		fingerprint inClusters: "0000,0001,0003,0402,0500,0020,0B05,FC02", outClusters: "0019", manufacturer: "CentraLite", model: "3321"
-		fingerprint inClusters: "0000,0001,0003,0402,0500,0020,0B05,FC02", outClusters: "0019", manufacturer: "CentraLite", model: "3321-S", deviceJoinName: "Multipurpose Sensor"
-		fingerprint inClusters: "0000,0001,0003,000F,0020,0402,0500,FC02", outClusters: "0019", manufacturer: "SmartThings", model: "multiv4", deviceJoinName: "Multipurpose Sensor"
-		fingerprint inClusters: "0000,0001,0003,0020,0402,0500,FC02", outClusters: "0019", manufacturer: "Samjin", model: "multi", deviceJoinName: "Multipurpose Sensor"
 
-		attribute "status", "string"
+		fingerprint manufacturer: "Samjin", model: "multi", deviceJoinName: "IoT Fuse Demo"
 	}
 
 	simulator {
@@ -69,18 +67,18 @@ metadata {
 			input title: "Temperature Offset", description: "This feature allows you to correct any temperature variations by selecting an offset. Ex: If your sensor consistently reports a temp that's 5 degrees too warm, you'd enter '-5'. If 3 degrees too cold, enter '+3'.", displayDuringSetup: false, type: "paragraph", element: "paragraph"
 			input "tempOffset", "number", title: "Degrees", description: "Adjust temperature by this many degrees", range: "*..*", displayDuringSetup: false
 		}
-		section {
-			input("garageSensor", "enum", title: "Do you want to use this sensor on a garage door?", description: "Tap to set", options: ["Yes", "No"], defaultValue: "No", required: false, displayDuringSetup: false)
-		}
 	}
 
 	tiles(scale: 2) {
-		multiAttributeTile(name: "status", type: "generic", width: 6, height: 4) {
-			tileAttribute("device.status", key: "PRIMARY_CONTROL") {
-				attributeState "open", label: 'Open', icon: "st.contact.contact.open", backgroundColor: "#e86d13"
-				attributeState "closed", label: 'Closed', icon: "st.contact.contact.closed", backgroundColor: "#00a0dc"
-				attributeState "garage-open", label: 'Open', icon: "st.doors.garage.garage-open", backgroundColor: "#e86d13"
-				attributeState "garage-closed", label: 'Closed', icon: "st.doors.garage.garage-closed", backgroundColor: "#00a0dc"
+		multiAttributeTile(name:"switch", type: "lighting", width: 6, height: 4, canChangeIcon: true){
+			tileAttribute ("device.switch", key: "PRIMARY_CONTROL") {
+				attributeState "on", label:'${name}', action:"switch.off", icon:"st.switches.light.on", backgroundColor:"#00A0DC", nextState:"turningOff"
+				attributeState "off", label:'${name}', action:"switch.on", icon:"st.switches.light.off", backgroundColor:"#ffffff", nextState:"turningOn"
+				attributeState "turningOn", label:'${name}', action:"switch.off", icon:"st.switches.light.on", backgroundColor:"#00A0DC", nextState:"turningOff"
+				attributeState "turningOff", label:'${name}', action:"switch.on", icon:"st.switches.light.off", backgroundColor:"#ffffff", nextState:"turningOn"
+			}
+			tileAttribute ("device.level", key: "SLIDER_CONTROL") {
+				attributeState "level", action:"switch level.setLevel"
 			}
 		}
 		standardTile("contact", "device.contact", width: 2, height: 2) {
@@ -112,8 +110,8 @@ metadata {
 		}
 
 
-		main(["status", "acceleration", "temperature"])
-		details(["status", "acceleration", "temperature", "battery", "refresh"])
+		main(["switch", "temperature"])
+		details(["switch", "temperature", "battery", "refresh"])
 	}
 }
 
@@ -190,19 +188,20 @@ def parse(String description) {
 		log.debug "enroll response: ${cmds}"
 		result = cmds?.collect { new physicalgraph.device.HubAction(it) }
 	}
+
+	log.info "parse returning $result"
 	return result
 }
 
 private List<Map> handleAcceleration(descMap) {
 	def result = []
 	if (descMap.clusterInt == 0xFC02 && descMap.attrInt == 0x0010) {
-		def value = descMap.value == "01" ? "active" : "inactive"
-		log.debug "Acceleration $value"
+		def value = descMap.value == "01" ? "on" : "off"
+		log.debug "Acceleration->Switch $value"
 		result << [
-				name           : "acceleration",
+				name           : "switch",
 				value          : value,
 				descriptionText: "{{ device.displayName }} was $value",
-				isStateChange  : isStateChange(device, "acceleration", value),
 				translatable   : true
 		]
 
@@ -243,19 +242,20 @@ private List<Map> parseAxis(List<Map> attrData) {
 
 	log.debug "parseAxis -- ${xyzResults}"
 
-	if (garageSensor == "Yes")
-		results += garageEvent(xyzResults.z)
-
 	def value = "${xyzResults.x},${xyzResults.y},${xyzResults.z}"
+	//results << [
+	//		name           : "switch",
+	//		value          : xyzResults.y < -900 ? "off": "on",
+	//]
+
 	results << [
-			name           : "threeAxis",
-			value          : value,
-			linkText       : getLinkText(device),
-			descriptionText: "${getLinkText(device)} was ${value}",
-			handlerName    : name,
-			isStateChange  : isStateChange(device, "threeAxis", value),
-			displayed      : false
+	        name: "level",
+			value: Math.max(0, Math.min(100, Math.round(Math.abs(xyzResults.z) / 10)))
 	]
+//	results << [
+//	        name: "colorTemperature",
+//			value: Math.max(2700, Math.min(6500, Math.round(Math.abs(xyzResults.z) / 1000 * 3800) + 2700))
+//	]
 	results
 }
 
@@ -266,17 +266,10 @@ private List<Map> parseIasMessage(String description) {
 }
 
 private List<Map> translateZoneStatus(ZoneStatus zs) {
-	List<Map> results = []
-
-	if (garageSensor != "Yes") {
-		def value = zs.isAlarm1Set() ? 'open' : 'closed'
-		log.debug "Contact: ${device.displayName} value = ${value}"
-		def descriptionText = value == 'open' ? '{{ device.displayName }} was opened' : '{{ device.displayName }} was closed'
-		results << [name: 'contact', value: value, descriptionText: descriptionText, displayed: false, translatable: true]
-		results << [name: 'status', value: value, descriptionText: descriptionText, translatable: true]
-	}
-
-	return results
+	def value = zs.isAlarm1Set() ? 'open' : 'closed'
+	log.debug "Contact: ${device.displayName} value = ${value}"
+	def descriptionText = value == 'open' ? '{{ device.displayName }} was opened' : '{{ device.displayName }} was closed'
+	[[name: 'contact', value: value, descriptionText: descriptionText, displayed: false, translatable: true]]
 }
 
 private Map getBatteryResult(rawValue) {
@@ -349,26 +342,6 @@ private Map getBatteryPercentageResult(rawValue) {
 	}
 
 	return result
-}
-
-List<Map> garageEvent(zValue) {
-	List<Map> results = []
-	def absValue = zValue.abs()
-	def contactValue = null
-	def garageValue = null
-	if (absValue > 900) {
-		contactValue = 'closed'
-		garageValue = 'garage-closed'
-	} else if (absValue < 100) {
-		contactValue = 'open'
-		garageValue = 'garage-open'
-	}
-	if (contactValue != null) {
-		def descriptionText = contactValue == 'open' ? '{{ device.displayName }} was opened' : '{{ device.displayName }} was closed'
-		results << [name: 'contact', value: contactValue, descriptionText: descriptionText, displayed: false, translatable: true]
-		results << [name: 'status', value: garageValue, descriptionText: descriptionText, translatable: true]
-	}
-	results
 }
 
 /**
@@ -450,22 +423,6 @@ def configure() {
 
 def updated() {
 	log.debug "updated called"
-	log.info "garage value : $garageSensor"
-	if (garageSensor == "Yes") {
-		def descriptionText = "Updating device to garage sensor"
-		if (device.latestValue("status") == "open") {
-			sendEvent(name: 'status', value: 'garage-open', descriptionText: descriptionText, translatable: true)
-		} else if (device.latestValue("status") == "closed") {
-			sendEvent(name: 'status', value: 'garage-closed', descriptionText: descriptionText, translatable: true)
-		}
-	} else {
-		def descriptionText = "Updating device to open/close sensor"
-		if (device.latestValue("status") == "garage-open") {
-			sendEvent(name: 'status', value: 'open', descriptionText: descriptionText, translatable: true)
-		} else if (device.latestValue("status") == "garage-closed") {
-			sendEvent(name: 'status', value: 'closed', descriptionText: descriptionText, translatable: true)
-		}
-	}
 }
 
 private hexToSignedInt(hexVal) {
